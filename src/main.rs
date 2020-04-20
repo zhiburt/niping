@@ -43,10 +43,6 @@ fn parse_address(addr: &str) -> Option<net::IpAddr> {
     let resolver = Resolver::new(ResolverConfig::default(), ResolverOpts::default()).unwrap();
     let response = resolver.lookup_ip(addr);
     if let Ok(response) = response {
-        for r in response.iter() {
-            println!("{}", r);
-        }
-
         let addr = response.iter().next().unwrap();
         return Some(addr);
     }
