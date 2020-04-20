@@ -12,7 +12,7 @@ Currently it supports only IpV4 and a small bunch of options.
 >
 > Initial read timeout should be calculated as RTT * 2, but I have no idea yet how to calculate RTT initially.
 >
-> Connection to host. Original implementation of ping does a bit different thing which we do, as I can say it make connection after reaching the remote host. And may be it calculates RTT here. It's vital factor since if you run two process in place they will interfere without the connection. Nevertheless I might be wrong about the connection. But this is the best idea I hold ([Example](example-of-the-spoiled-socket)).
+> Connection to host. Original implementation of ping does a bit different thing which we do, as I can say it make connection after reaching the remote host. And may be it calculates RTT here. It's vital factor since if you run two process in place they will interfere without the connection. Nevertheless I might be wrong about the connection. But this is the best idea I hold ([Example](#example-of-the-spoiled-socket)).
 
 
 ## Usage
