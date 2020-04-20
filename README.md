@@ -4,13 +4,22 @@
 ## Overview
 
 `niping` is tend to be similar with original `ping` interface.
-Currently it supports only IpV4 and a small bunch of options. The unresolved issues is showed in the 0f864b521aa266a93fd847af7d6d363743fb36e4 description.
+Currently it supports only IpV4 and a small bunch of options.
+
+> There are not well structured moments yet.
+>
+> Error handling, I decided to left it in `.unwrap()` style in order to get advantage in faster develop process.
+>
+> Initial read timeout should be calculated as RTT * 2, but I have no idea yet how to calculate RTT initially.
+>
+> Connection to host. Original implementation of ping does a bit different thing which we do, as I can say it make connection after reaching the remote host. And may be it calculates RTT here. It's vital factor since if you run two process in place they will interfere without the connection. Nevertheless I might be wrong about the connection. But this is the best idea I hold ([Example](example-of-the-spoiled-socket)).
+
 
 ## Usage
 
 You use it with cargo or build it by `cargo install`. And to open new socket you should have the correct right. Therefore you may do that under superuser.
 
-Basic example.
+#### Basic example.
 
 ```bash
 $ sudo cargo run -- -c 4 rust-lang.org
@@ -24,7 +33,7 @@ PING 54.192.230.75 (rust-lang.org)
 5 packets transmitted, received 5, time 5147 ms
 ```
 
-Example of a ttl option(`-t`)
+#### Example of a ttl option(`-t`)
 
 ```bash
 > sudo niping -c 2 -t 2 google.com
@@ -36,9 +45,9 @@ PING 172.217.16.14 (google.com)
 2 packets transmitted, received 0, time 2018 ms
 ```
 
-Example of the main problem so far
+#### Example of the spoiled socket
 
-As initial commit says if we start for example ping in the time `niping` working they will interfere. We just get unknown packets. The problem can be resolved by the uniq playground in ICMP header but the algorithm is crushed when we set `-t` option so it's not completed yet. 
+If we start for example ping in the time `niping` working they will interfere. We just get unknown packets. The problem can be resolved by the uniq playground in ICMP header but the algorithm is crushed when we set `-t` option so the packets has incorrect playgrounds.
 
 ```bash
 > sudo niping google.com
