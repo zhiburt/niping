@@ -6,10 +6,9 @@
 `niping` is tend to be similar with original `ping` interface.
 Currently it supports only IpV4 and a small bunch of options. The unresolved issues is showed in the 0f864b521aa266a93fd847af7d6d363743fb36e4 description.
 
-
 ## Usage
 
-You use it with cargo or build it by `cargo install`.
+You use it with cargo or build it by `cargo install`. And to open new socket you should have the correct right. Therefore you may do that under superuser.
 
 Basic example.
 
@@ -39,7 +38,7 @@ PING 172.217.16.14 (google.com)
 
 Example of the main problem so far
 
-As initial commit says if we start for example ping in the time `niping` working they will interfere.
+As initial commit says if we start for example ping in the time `niping` working they will interfere. We just get unknown packets. The problem can be resolved by the uniq playground in ICMP header but the algorithm is crushed when we set `-t` option so it's not completed yet. 
 
 ```bash
 > sudo niping google.com
