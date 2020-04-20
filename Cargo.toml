@@ -1,0 +1,13 @@
+[package]
+name = "niping"
+version = "0.1.0"
+authors = ["Maxim Zhiburt <zhiburt@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+trust-dns-resolver = "*"
+socket2 = "*"
+clap = { git = "https://github.com/clap-rs/clap/", rev = "aae96236b27d43ede24bd7e58668786cd1073c21" }
+crossbeam = "0.7.3"
+ctrlc = "3.1.4"
+rand = "0.7.3"
