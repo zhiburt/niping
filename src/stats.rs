@@ -4,12 +4,13 @@ use trust_dns_resolver::Resolver;
 
 use crate::{
     packet::{icmp, ip},
-    ping::Result,
+    ping::{DATA_SIZE, Result},
 };
 
 pub struct Statistics {
     addr: IpAddr,
     resource_name: String,
+    data_size: usize,
 }
 
 pub struct PacketInfo {
@@ -24,6 +25,7 @@ impl Statistics {
         Self {
             addr: addr,
             resource_name: resource,
+            data_size: DATA_SIZE,
         }
     }
 
@@ -31,7 +33,7 @@ impl Statistics {
         let mut transmitted = 0;
         let mut received = 0;
         let time = std::time::Instant::now();
-        println!("PING {} ({})", self.addr, self.resource_name);
+        println!("PING {} ({}) {} bytes of data", self.addr, self.resource_name, self.data_size);
         while let Ok(Ok(info)) = packet.recv() {
             let dns_name = reverse_address(IpAddr::from(info.ip_packet.source_ip))
                 .map_or(String::from("gateway"), |n| n);
