@@ -8,6 +8,8 @@ use std::net;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+pub const DATA_SIZE: usize = 32;
+
 pub struct Settings {
     pub addr: net::IpAddr,
     pub ttl: Option<u32>,
@@ -127,9 +129,8 @@ fn socket_address(addr: net::IpAddr) -> socket2::SockAddr {
 }
 
 fn uniq_payload() -> Vec<u8> {
-    const SIZE: usize = 32;
     let mut p = Vec::new();
-    for _ in 0..SIZE {
+    for _ in 0..DATA_SIZE {
         p.push(rand::random())
     }
     p
