@@ -77,7 +77,9 @@ impl<'a> Packet<'a> for ICMPacket {
         let seq_count = (u16::from(buf[6]) << 8) + buf[7] as u16;
 
         let mut header = Self::new(tp, code, ident, seq_count);
-        header.add_payload(&buf[8..]);
+        if buf.len() > 8 {
+            header.add_payload(&buf[8..]);
+        }
         Ok(header)
     }
 
