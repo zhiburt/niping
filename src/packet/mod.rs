@@ -21,6 +21,19 @@ pub trait Packet<'a> {
     fn parse(buf: &'a [u8]) -> Result<Self>
     where
         Self: std::marker::Sized;
+
+    fn verify(_: &'a [u8]) -> Result<()> {
+        Ok(())
+    }
+
+    fn parse_verified(buf: &'a [u8]) -> Result<Self>
+    where
+        Self: std::marker::Sized,
+    {
+        Self::verify(buf)?;
+        Self::parse(buf)
+    }
+
     fn hint_size(&self) -> Option<usize> {
         None
     }
