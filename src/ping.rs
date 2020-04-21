@@ -49,7 +49,7 @@ pub fn ping_loop(cfg: Settings, stats: Sender<Result<PacketInfo>>, terminated: A
         sock.set_ttl(ttl).unwrap();
     }
 
-    let mut req = icmp::EchoRequest::new(10, 0);
+    let mut req = icmp::EchoRequest::new(uniq_ident(), 0);
     let payload = uniq_payload();
     req.add_payload(&payload);
     let header_size = req.hint_size().unwrap();
@@ -72,20 +72,44 @@ pub fn ping_loop(cfg: Settings, stats: Sender<Result<PacketInfo>>, terminated: A
 
         sock.send_to(&buf[..header_size], &sock_addr).unwrap();
         let now = std::time::Instant::now();
-        let received_bytes = sock.recv(&mut buf).unwrap();
-        let time = now.elapsed();
-        let ip = ip::IPV4Packet::parse(&buf[..received_bytes]).unwrap();
-        let icmp = icmp::ICMPacket::parse(&ip.data).unwrap();
-
-        let info = PacketInfo {
-            ip_packet: ip,
-            packet: icmp,
-            received_bytes: received_bytes,
-            time: time,
+        let info = loop {
+            let received_bytes = sock.recv(&mut buf).unwrap();
+            let time = now.elapsed();
+            let ip = ip::IPV4Packet::parse(&buf[..received_bytes]).unwrap();
+            let repl = icmp::ICMPacket::parse_verified(&ip.data).unwrap();
+            if own_packet(&req, &repl) {
+                break PacketInfo {
+                    ip_packet: ip,
+                    packet: repl,
+                    received_bytes: received_bytes,
+                    time: time,
+                };
+            }
         };
+
         stats.send(Ok(info)).unwrap();
 
         std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+fn own_packet(req: &icmp::ICMPacket, repl: &icmp::ICMPacket) -> bool {
+    match repl.tp {
+        tp if tp == icmp::PacketType::EchoReply as u8 => req.payload == repl.payload,
+        tp if tp == icmp::PacketType::TimeExceeded as u8 => {
+            let ip = ip::IPV4Packet::parse(repl.payload.as_ref().unwrap()).unwrap();
+            let icmp = icmp::ICMPacket::parse(&ip.data).unwrap();
+
+            // even though we might have to verify payload according to rhe rfc-792,
+            // there are gateways that not include the payload in internal icmp header
+            // so there's only one option to verify
+            // identificator which is required by rfc-1812 and rfc-792 as well.
+            //
+            // rfc792  page 8
+            // rfc1812 section 4.3.2.3
+            icmp.ident == req.ident
+        }
+        _ => true, // unimplemented
     }
 }
 
@@ -103,10 +127,14 @@ fn socket_address(addr: net::IpAddr) -> socket2::SockAddr {
 }
 
 fn uniq_payload() -> Vec<u8> {
-    const SIZE: usize = 48;
+    const SIZE: usize = 32;
     let mut p = Vec::new();
     for _ in 0..SIZE {
         p.push(rand::random())
     }
     p
+}
+
+fn uniq_ident() -> u16 {
+    rand::random()
 }
