@@ -70,11 +70,6 @@ impl<'a> Packet<'a> for ICMPacket {
             return Err(PacketError::InvalidBufferSize);
         }
 
-        let checksum = checksum(buf);
-        if checksum != 0 {
-            return Err(PacketError::ChecksumFailed);
-        }
-
         let tp = buf[0];
         let code = buf[1];
 
@@ -84,6 +79,15 @@ impl<'a> Packet<'a> for ICMPacket {
         let mut header = Self::new(tp, code, ident, seq_count);
         header.add_payload(&buf[8..]);
         Ok(header)
+    }
+
+    fn verify(buf: &'a [u8]) -> Result<()> {
+        let checksum = checksum(buf);
+        if checksum != 0 {
+            return Err(PacketError::ChecksumFailed);
+        }
+
+        Ok(())
     }
 }
 
