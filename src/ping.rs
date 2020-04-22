@@ -79,9 +79,7 @@ pub struct Ping {
 
 impl Ping {
     pub fn ping_loop(self, stats: Sender<Result<PacketInfo>>, terminated: Arc<AtomicBool>) {
-        let mut req = icmp::EchoRequest::new(uniq_ident(), 0);
-        let payload = uniq_payload();
-        req.add_payload(&payload);
+        let mut req = Ping::default_request();
         let header_size = req.hint_size().unwrap();
 
         let mut packets_limit = self.packets_limit;
@@ -118,6 +116,13 @@ impl Ping {
 
             thread::sleep(self.send_interval);
         }
+    }
+
+    fn default_request() -> ICMPacket {
+        let mut req = icmp::EchoRequest::new(uniq_ident(), 0);
+        let payload = uniq_payload();
+        req.add_payload(&payload);
+        req
     }
 }
 
