@@ -13,15 +13,16 @@ You use it with cargo or build it by `cargo install`. And to open new socket you
 #### Basic example.
 
 ```bash
-$ sudo cargo run -- -c 4 rust-lang.org
-PING 54.192.230.75 (rust-lang.org)
-76 bytes from server-54-192-230-75.waw50.r.cloudfront.net. (54.192.230.75): icmp_seq=1 ttl=244 time=27 ms
-76 bytes from server-54-192-230-75.waw50.r.cloudfront.net. (54.192.230.75): icmp_seq=2 ttl=244 time=28 ms
-76 bytes from server-54-192-230-75.waw50.r.cloudfront.net. (54.192.230.75): icmp_seq=3 ttl=244 time=30 ms
-76 bytes from server-54-192-230-75.waw50.r.cloudfront.net. (54.192.230.75): icmp_seq=4 ttl=244 time=28 ms
+$ sudo niping -c 4 rust-lang.org
+PING 13.35.253.100 (rust-lang.org) 32 bytes of data
+60 bytes from server-13-35-253-100.fra6.r.cloudfront.net. (13.35.253.100): icmp_seq=1 ttl=241 time=40 ms
+60 bytes from server-13-35-253-100.fra6.r.cloudfront.net. (13.35.253.100): icmp_seq=2 ttl=241 time=40 ms
+60 bytes from server-13-35-253-100.fra6.r.cloudfront.net. (13.35.253.100): icmp_seq=3 ttl=241 time=40 ms
+60 bytes from server-13-35-253-100.fra6.r.cloudfront.net. (13.35.253.100): icmp_seq=4 ttl=241 time=41 ms
 
 ------- rust-lang.org statistics -------
-5 packets transmitted, received 5, time 5147 ms
+4 packets transmitted, received 4, time 3220 ms
+rtt min=40 ms max=41 ms avg=40 ms
 ```
 
 #### Example of a ttl option(`-t`)
