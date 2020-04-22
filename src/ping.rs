@@ -1,5 +1,9 @@
 use crate::{
-    packet::{icmp, ip, Packet, PacketError},
+    packet::{
+        icmp::{self, ICMPacket},
+        ip::IPV4Packet,
+        Packet, PacketError,
+    },
     stats::PacketInfo,
 };
 use crossbeam::channel::Sender;
@@ -7,6 +11,8 @@ use std::io;
 use std::net;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
+use std::time::{self, Duration};
 
 pub const DATA_SIZE: usize = 32;
 
@@ -42,9 +48,7 @@ pub fn ping_loop(cfg: Settings, stats: Sender<Result<PacketInfo>>, terminated: A
     let sock_addr = socket_address(cfg.addr);
     sock.set_read_timeout(Some(
         cfg.read_timeout
-            .map_or(std::time::Duration::from_secs(10), |seconds| {
-                std::time::Duration::from_secs(seconds as u64)
-            }),
+            .map_or(Duration::from_secs(10), |s| Duration::from_secs(s as u64)),
     ))
     .unwrap();
     if let Some(ttl) = cfg.ttl {
@@ -59,26 +63,17 @@ pub fn ping_loop(cfg: Settings, stats: Sender<Result<PacketInfo>>, terminated: A
     let mut packets_limit = cfg.packets_limit;
 
     let mut buf = vec![0; 300];
-    while terminated.load(Ordering::SeqCst) && {
-        match packets_limit {
-            Some(ref limit) if *limit == 0 => false,
-            Some(ref mut limit) => {
-                *limit -= 1;
-                true
-            }
-            _ => true,
-        }
-    } {
+    while terminated.load(Ordering::SeqCst) {
         req.seq += 1;
         req.build(&mut buf[..header_size]).unwrap();
 
         sock.send_to(&buf[..header_size], &sock_addr).unwrap();
-        let now = std::time::Instant::now();
+        let now = time::Instant::now();
         let info = loop {
             let received_bytes = sock.recv(&mut buf).unwrap();
             let time = now.elapsed();
-            let ip = ip::IPV4Packet::parse(&buf[..received_bytes]).unwrap();
-            let repl = icmp::ICMPacket::parse_verified(&ip.data).unwrap();
+            let ip = IPV4Packet::parse(&buf[..received_bytes]).unwrap();
+            let repl = ICMPacket::parse_verified(&ip.data).unwrap();
             if own_packet(&req, &repl) {
                 break PacketInfo {
                     ip_packet: ip,
@@ -91,15 +86,22 @@ pub fn ping_loop(cfg: Settings, stats: Sender<Result<PacketInfo>>, terminated: A
 
         stats.send(Ok(info)).unwrap();
 
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        if let Some(ref mut limit) = packets_limit {
+            *limit -= 1;
+            if *limit == 0 {
+                break;
+            }
+        }
+
+        thread::sleep(Duration::from_secs(1));
     }
 }
 
-fn own_packet(req: &icmp::ICMPacket, repl: &icmp::ICMPacket) -> bool {
+fn own_packet(req: &ICMPacket, repl: &ICMPacket) -> bool {
     match repl.tp {
         tp if tp == icmp::PacketType::EchoReply as u8 => req.payload == repl.payload,
         tp if tp == icmp::PacketType::TimeExceeded as u8 => {
-            let ip = ip::IPV4Packet::parse(repl.payload.as_ref().unwrap()).unwrap();
+            let ip = IPV4Packet::parse(repl.payload.as_ref().unwrap()).unwrap();
             let icmp = icmp::ICMPacket::parse(&ip.data).unwrap();
 
             // even though we might have to verify payload according to rhe rfc-792,
