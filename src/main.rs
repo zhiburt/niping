@@ -18,6 +18,9 @@ fn main() {
         ttl: opts.ttl,
         read_timeout: opts.read_timeout,
         packets_limit: opts.count_packets,
+        send_interval: opts
+            .send_interval
+            .map(|s| std::time::Duration::from_secs_f32(s)),
     };
 
     let terminated = Arc::new(AtomicBool::new(true));

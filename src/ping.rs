@@ -21,6 +21,7 @@ pub struct Settings {
     pub ttl: Option<u32>,
     pub read_timeout: Option<u32>,
     pub packets_limit: Option<usize>,
+    pub send_interval: Option<Duration>,
 }
 
 pub type Result<T> = std::result::Result<T, PingError>;
@@ -62,6 +63,8 @@ pub fn ping_loop(cfg: Settings, stats: Sender<Result<PacketInfo>>, terminated: A
 
     let mut packets_limit = cfg.packets_limit;
 
+    let send_interval = cfg.send_interval.map_or(Duration::from_secs(1), |i| i);
+
     let mut buf = vec![0; 300];
     while terminated.load(Ordering::SeqCst) {
         req.seq += 1;
@@ -93,7 +96,7 @@ pub fn ping_loop(cfg: Settings, stats: Sender<Result<PacketInfo>>, terminated: A
             }
         }
 
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(send_interval);
     }
 }
 

@@ -15,6 +15,9 @@ pub struct Opts {
     /// Stop after sending count ECHO_REQUEST packets.
     #[clap(short = "c")]
     pub count_packets: Option<usize>,
+    /// Wait interval seconds between sending each packet.
+    #[clap(short = "i")]
+    pub send_interval: Option<f32>,
     /// The address ping which
     pub address: String,
 }
