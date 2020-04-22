@@ -4,7 +4,7 @@ use trust_dns_resolver::Resolver;
 
 use crate::{
     packet::{icmp, ip},
-    ping::{DATA_SIZE, Result},
+    ping::{Result, DATA_SIZE},
 };
 
 pub struct Statistics {
@@ -32,8 +32,12 @@ impl Statistics {
     pub fn run(self, packet: Receiver<Result<PacketInfo>>) {
         let mut transmitted = 0;
         let mut received = 0;
+        let mut rtt = Vec::new();
         let time = std::time::Instant::now();
-        println!("PING {} ({}) {} bytes of data", self.addr, self.resource_name, self.data_size);
+        println!(
+            "PING {} ({}) {} bytes of data",
+            self.addr, self.resource_name, self.data_size
+        );
         while let Ok(Ok(info)) = packet.recv() {
             let dns_name = reverse_address(IpAddr::from(info.ip_packet.source_ip))
                 .map_or(String::from("gateway"), |n| n);
@@ -60,10 +64,16 @@ impl Statistics {
                 info.received_bytes, dns_name, info.ip_packet.source_ip, s
             );
 
+            rtt.push(info.time);
             transmitted += 1;
         }
 
         let time = time.elapsed();
+
+        let rtt_min = rtt.iter().min().unwrap();
+        let rtt_max = rtt.iter().max().unwrap();
+        let rtt_len = rtt.len();
+        let rtt_avg = rtt.iter().sum::<std::time::Duration>() / rtt_len as u32;
 
         println!();
         println!("------- {} statistics -------", self.resource_name);
@@ -72,6 +82,12 @@ impl Statistics {
             transmitted,
             received,
             display_duration(time)
+        );
+        println!(
+            "rtt min={} max={} avg={}",
+            display_duration(*rtt_min),
+            display_duration(*rtt_max),
+            display_duration(rtt_avg),
         );
     }
 }
