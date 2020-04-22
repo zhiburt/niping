@@ -13,7 +13,7 @@ fn main() {
     let opts = args::config();
     let address = parse_address(&opts.address).unwrap();
 
-    let ping_settings = ping::Settings {
+    let ping = ping::Settings {
         addr: address.clone(),
         ttl: opts.ttl,
         read_timeout: opts.read_timeout,
@@ -21,7 +21,8 @@ fn main() {
         send_interval: opts
             .send_interval
             .map(|s| std::time::Duration::from_secs_f32(s)),
-    };
+    }
+    .build();
 
     let terminated = Arc::new(AtomicBool::new(true));
     let t = terminated.clone();
@@ -32,9 +33,9 @@ fn main() {
 
     let (packet_s, packet_r) = unbounded();
 
-    let ping_handle = thread::spawn(move || ping::ping_loop(ping_settings, packet_s, terminated));
+    let ping_handle = thread::spawn(move || ping.ping_loop(packet_s, terminated));
     let stats_handle = thread::spawn(move || {
-        let stats = stats::Statistics::new(opts.address, address.clone());
+        let stats = stats::Statistics::new(opts.address, address);
         stats.run(packet_r)
     });
 
