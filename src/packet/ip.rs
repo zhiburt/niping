@@ -4,7 +4,7 @@ pub enum IPacket {
     V4(IPV4Packet),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct IPV4Packet {
     pub source_ip: std::net::Ipv4Addr,
     pub ttl: u8,
@@ -12,7 +12,7 @@ pub struct IPV4Packet {
     pub data: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Protocol {
     ICMP,
     IP,
@@ -71,5 +71,63 @@ impl From<u8> for Protocol {
             4 => Protocol::IP,
             _ => unimplemented!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse() {
+        let (buf, expected) = setup();
+
+        let p = IPV4Packet::parse(&buf);
+
+        assert!(p.is_ok());
+        assert_eq!(expected, p.unwrap())
+    }
+
+    #[test]
+    fn parse_cut_buffer() {
+        let (buf, _) = setup();
+
+        let p = IPV4Packet::parse(&buf[..8]);
+
+        assert!(p.is_err());
+    }
+
+    #[test]
+    fn parse_incorrect_version() {
+        let (mut buf, _) = setup();
+        buf[0] = (6 << 4) + (buf[0] & 0x0f);
+
+        let p = IPV4Packet::parse(&buf);
+
+        assert!(p.is_err());
+    }
+
+    #[test]
+    fn parse_incorrect_packet_size_field() {
+        let (mut buf, _) = setup();
+        buf[0] = (4 << 4) + ((buf.len() / 4) as u8 + 1);
+        
+        let p = IPV4Packet::parse(&buf);
+
+        assert!(p.is_err());
+    }
+
+    fn setup() -> (Vec<u8>, IPV4Packet) {
+        let b = [
+            69, 0, 0, 60, 35, 24, 0, 0, 56, 1, 230, 134, 127, 0, 0, 1, 192, 168, 100, 10,
+        ];
+        let p = IPV4Packet {
+            source_ip: std::net::Ipv4Addr::new(127, 0, 0, 1),
+            ttl: 56,
+            protocol: Protocol::ICMP,
+            data: Vec::new(),
+        };
+
+        (b.to_vec(), p)
     }
 }
