@@ -6,7 +6,7 @@ pub enum PacketType {
     TimeExceeded = 11,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ICMPacket {
     pub tp: u8,
     pub code: u8,
@@ -117,5 +117,73 @@ pub struct EchoRequest;
 impl EchoRequest {
     pub fn new(ident: u16, seq: u16) -> ICMPacket {
         ICMPacket::new(PacketType::EchoRequest as u8, 0, ident, seq)
+    }
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checksum() {
+        let buffer = [0, 0, 0, 1, 2, 3, 4];
+        let sum = super::checksum(&buffer);
+
+        assert_eq!(65015, sum);
+    }
+
+    #[test]
+    fn build() {
+        let p = ICMPacket::new(20, 0, 2020, 24);
+        let mut buf = [0; 8];
+        let res = p.build(&mut buf);
+        assert!(res.is_ok());
+        assert_eq!([20, 0, 228, 3, 7, 228, 0, 24], buf);
+    }
+
+    #[test]
+    fn build_cleaning_checksum_bytes() {
+        let p = ICMPacket::new(20, 0, 2020, 24);
+        let mut buf = [0; 8];
+        buf[2] = 1;
+        buf[3] = 2;
+        let res = p.build(&mut buf);
+        assert!(res.is_ok());
+        assert_eq!([20, 0, 228, 3, 7, 228, 0, 24], buf);
+    }
+
+    #[test]
+    #[should_panic]
+    fn build_in_small_buffer() {
+        let p = ICMPacket::new(20, 0, 2020, 24);
+        let mut buf = [0; 3];
+        p.build(&mut buf);
+    }
+
+    #[test]
+    fn parse() {
+        let buf = [20, 0, 228, 3, 7, 228, 0, 24];
+        let p = ICMPacket::parse(&buf);
+
+        assert!(p.is_ok());
+        assert_eq!(ICMPacket::new(20, 0, 2020, 24), p.unwrap());
+    }
+
+    #[test]
+    fn parse_cut_buffer() {
+        let buf = [20, 0, 228];
+        let p = ICMPacket::parse(&buf);
+
+        assert!(p.is_err());
+    }
+
+    #[test]
+    fn secure_parse() {
+        let mut buf = [20, 0, 228, 3, 7, 228, 0, 24];
+        let p = ICMPacket::parse_verified(&buf);
+        assert!(p.is_ok());
+
+        buf[2] = 0;
+        let p = ICMPacket::parse_verified(&buf);
+        assert!(p.is_err());
     }
 }
