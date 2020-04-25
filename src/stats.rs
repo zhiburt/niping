@@ -1,5 +1,6 @@
 use crossbeam::channel::Receiver;
 use std::net::IpAddr;
+use std::time::{self, Duration};
 use trust_dns_resolver::Resolver;
 
 use crate::{
@@ -17,7 +18,7 @@ pub struct PacketInfo {
     pub ip_packet: ip::IPV4Packet,
     pub packet: icmp::ICMPacket,
     pub received_bytes: usize,
-    pub time: std::time::Duration,
+    pub time: Duration,
 }
 
 impl Statistics {
@@ -33,39 +34,21 @@ impl Statistics {
         let mut transmitted = 0;
         let mut received = 0;
         let mut rtt = Vec::new();
-        let time = std::time::Instant::now();
+        let time = time::Instant::now();
+
         println!(
             "PING {} ({}) {} bytes of data",
             self.addr, self.resource_name, self.data_size
         );
+
         while let Ok(Ok(info)) = packet.recv() {
-            let dns_name = reverse_address(IpAddr::from(info.ip_packet.source_ip))
-                .map_or(String::from("gateway"), |n| n);
-
-            let s = match info.packet.tp {
-                tp if tp == icmp::PacketType::EchoReply as u8 => format!(
-                    "icmp_seq={} ttl={} time={}",
-                    info.packet.seq,
-                    info.ip_packet.ttl,
-                    display_duration(info.time)
-                ),
-                tp if tp == icmp::PacketType::TimeExceeded as u8 => {
-                    format!("icmp_seq={} Time to live exceeded", info.packet.seq)
-                }
-                _ => String::from("Pss: Unimplemented :("),
-            };
-
+            transmitted += 1;
+            rtt.push(info.time);
             if info.packet.tp == icmp::PacketType::EchoReply as u8 {
                 received += 1;
             }
 
-            println!(
-                "{} bytes from {} ({}): {}",
-                info.received_bytes, dns_name, info.ip_packet.source_ip, s
-            );
-
-            rtt.push(info.time);
-            transmitted += 1;
+            println!("{}", display_packet(info));
         }
 
         let time = time.elapsed();
@@ -73,7 +56,7 @@ impl Statistics {
         let rtt_min = rtt.iter().min().unwrap();
         let rtt_max = rtt.iter().max().unwrap();
         let rtt_len = rtt.len();
-        let rtt_avg = rtt.iter().sum::<std::time::Duration>() / rtt_len as u32;
+        let rtt_avg = rtt.iter().sum::<Duration>() / rtt_len as u32;
 
         println!();
         println!("------- {} statistics -------", self.resource_name);
@@ -92,7 +75,33 @@ impl Statistics {
     }
 }
 
-fn display_duration(d: std::time::Duration) -> String {
+fn display_packet(info: PacketInfo) -> String {
+    let specific_info = packet_info(&info);
+    let dns_name = reverse_address(IpAddr::from(info.ip_packet.source_ip))
+        .map_or(String::from("gateway"), |n| n);
+
+    format!(
+        "{} bytes from {} ({}): {}",
+        info.received_bytes, dns_name, info.ip_packet.source_ip, specific_info
+    )
+}
+
+fn packet_info(info: &PacketInfo) -> String {
+    match info.packet.tp {
+        tp if tp == icmp::PacketType::EchoReply as u8 => format!(
+            "icmp_seq={} ttl={} time={}",
+            info.packet.seq,
+            info.ip_packet.ttl,
+            display_duration(info.time)
+        ),
+        tp if tp == icmp::PacketType::TimeExceeded as u8 => {
+            format!("icmp_seq={} Time to live exceeded", info.packet.seq)
+        }
+        _ => String::from("Pss: Unimplemented :("),
+    }
+}
+
+fn display_duration(d: Duration) -> String {
     format!("{} ms", d.as_millis())
 }
 
