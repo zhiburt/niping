@@ -88,22 +88,8 @@ impl Ping {
             req.seq += 1;
             req.build(&mut buf[..header_size]).unwrap();
 
-            self.sock.send_to(&buf[..header_size], &self.addr).unwrap();
-            let now = time::Instant::now();
-            let info = loop {
-                let received_bytes = self.sock.recv(&mut buf).unwrap();
-                let time = now.elapsed();
-                let ip = IPV4Packet::parse(&buf[..received_bytes]).unwrap();
-                let repl = ICMPacket::parse_verified(&ip.data).unwrap();
-                if own_packet(&req, &repl) {
-                    break PacketInfo {
-                        ip_packet: ip,
-                        packet: repl,
-                        received_bytes: received_bytes,
-                        time: time,
-                    };
-                }
-            };
+            self.send_to(&buf[..header_size]).unwrap();
+            let info = self.recv(&req, &mut buf);
 
             stats.send(Ok(info)).unwrap();
 
@@ -116,6 +102,28 @@ impl Ping {
 
             thread::sleep(self.send_interval);
         }
+    }
+
+    fn recv(&self, req: &ICMPacket, mut buf: &mut [u8]) -> PacketInfo {
+        let now = time::Instant::now();
+        loop {
+            let received_bytes = self.sock.recv(&mut buf).unwrap();
+            let time = now.elapsed();
+            let ip = IPV4Packet::parse(&buf[..received_bytes]).unwrap();
+            let repl = ICMPacket::parse_verified(&ip.data).unwrap();
+            if own_packet(&req, &repl) {
+                break PacketInfo {
+                    ip_packet: ip,
+                    packet: repl,
+                    received_bytes: received_bytes,
+                    time: time,
+                };
+            }
+        }
+    }
+
+    fn send_to(&self, buf: &[u8]) -> std::io::Result<usize> {
+        self.sock.send_to(buf, &self.addr)
     }
 
     fn default_request() -> ICMPacket {
