@@ -11,7 +11,13 @@ use trust_dns_resolver::Resolver;
 
 fn main() {
     let opts = args::config();
-    let address = parse_address(&opts.address).unwrap();
+    let address = match parse_address(&opts.address) {
+        Some(addr) => addr,
+        None => {
+            println!("PING: {}: Name or service not known", opts.address);
+            return;
+        }
+    };
 
     let ping = ping::Settings {
         addr: address.clone(),
