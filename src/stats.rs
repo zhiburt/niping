@@ -67,7 +67,7 @@ impl Statistics {
             display_duration(time)
         );
         println!(
-            "rtt min={} max={} avg={}",
+            "rtt min/max/avg = {}/{}/{}",
             display_duration(*rtt_min),
             display_duration(*rtt_max),
             display_duration(rtt_avg),
@@ -102,7 +102,7 @@ fn packet_info(info: &PacketInfo) -> String {
 }
 
 fn display_duration(d: Duration) -> String {
-    format!("{} ms", d.as_millis())
+    format!("{:.2?}", d)
 }
 
 fn reverse_address(addr: IpAddr) -> Option<String> {
