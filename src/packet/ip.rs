@@ -1,15 +1,32 @@
+use std::net::Ipv4Addr;
 use super::{Packet, PacketError, Result};
 
-pub enum IPacket {
-    V4(IPV4Packet),
+pub enum IPacket<'a> {
+    V4(IPV4Packet<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct IPV4Packet {
-    pub source_ip: std::net::Ipv4Addr,
-    pub ttl: u8,
-    pub protocol: Protocol,
-    pub data: Vec<u8>,
+pub struct IPV4Packet<'a> {
+    buf: &'a [u8]
+}
+
+impl IPV4Packet<'_> {
+    pub fn ttl(&self) -> u8 {
+        self.buf[8]
+    }
+
+    pub fn protocol(&self) -> Protocol {
+        Protocol::from(self.buf[9])
+    }
+
+    pub fn source_ip(&self) -> Ipv4Addr {
+        Ipv4Addr::new(self.buf[12], self.buf[13], self.buf[14], self.buf[15])
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        let size = 4 * (self.buf[0] & 0x0f) as usize;
+        &self.buf[size..]
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -21,12 +38,8 @@ pub enum Protocol {
 const IPV4_VERSION: u8 = 4;
 const MINIMUM_HEADER_SIZE: usize = 20;
 
-impl<'a> Packet<'a> for IPV4Packet {
-    fn build(&self, buff: &mut [u8]) -> Result<usize> {
-        unimplemented!()
-    }
-
-    fn hint_size(&self) -> Option<usize> {
+impl<'a> Packet<'a> for IPV4Packet<'a> {
+    fn build(&self) -> &[u8] {
         unimplemented!()
     }
 
@@ -44,23 +57,11 @@ impl<'a> Packet<'a> for IPV4Packet {
         }
 
         let size = 4 * (buf[0] & 0x0f) as usize;
-
         if buf.len() < size {
             return Err(PacketError::InvalidHeaderSize);
         }
 
-        let ttl = buf[8];
-        let protocol = Protocol::from(buf[9]);
-        let source_ip = std::net::Ipv4Addr::new(buf[12], buf[13], buf[14], buf[15]);
-
-        let data = buf[size..].to_vec();
-
-        Ok(Self {
-            source_ip,
-            ttl,
-            protocol,
-            data,
-        })
+        Ok(Self { buf })
     }
 }
 
@@ -117,16 +118,11 @@ mod tests {
         assert!(p.is_err());
     }
 
-    fn setup() -> (Vec<u8>, IPV4Packet) {
-        let b = [
+    fn setup<'a>() -> (Vec<u8>, IPV4Packet<'a>) {
+        let b: &'static [u8] = &[
             69, 0, 0, 60, 35, 24, 0, 0, 56, 1, 230, 134, 127, 0, 0, 1, 192, 168, 100, 10,
         ];
-        let p = IPV4Packet {
-            source_ip: std::net::Ipv4Addr::new(127, 0, 0, 1),
-            ttl: 56,
-            protocol: Protocol::ICMP,
-            data: Vec::new(),
-        };
+        let p = IPV4Packet::parse(&b).unwrap();
 
         (b.to_vec(), p)
     }

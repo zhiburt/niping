@@ -4,7 +4,7 @@ use std::time::{self, Duration};
 use trust_dns_resolver::Resolver;
 
 use crate::{
-    packet::{icmp, ip},
+    packet::icmp,
     ping::{Result, DATA_SIZE},
 };
 
@@ -15,8 +15,10 @@ pub struct Statistics {
 }
 
 pub struct PacketInfo {
-    pub ip_packet: ip::IPV4Packet,
-    pub packet: icmp::ICMPacket,
+    pub ip_source_ip: IpAddr,
+    pub ip_ttl: u8,
+    pub icmp_seq: u16,
+    pub icmp_type: u8,
     pub received_bytes: usize,
     pub time: Duration,
 }
@@ -44,7 +46,7 @@ impl Statistics {
         while let Ok(Ok(info)) = packet.recv() {
             transmitted += 1;
             rtt.push(info.time);
-            if info.packet.tp == icmp::PacketType::EchoReply as u8 {
+            if info.icmp_type == icmp::PacketType::EchoReply as u8 {
                 received += 1;
             }
 
@@ -77,25 +79,25 @@ impl Statistics {
 
 fn display_packet(info: PacketInfo) -> String {
     let specific_info = packet_info(&info);
-    let dns_name = reverse_address(IpAddr::from(info.ip_packet.source_ip))
-        .map_or(String::from("gateway"), |n| n);
+    let dns_name =
+        reverse_address(IpAddr::from(info.ip_source_ip)).map_or(String::from("gateway"), |n| n);
 
     format!(
         "{} bytes from {} ({}): {}",
-        info.received_bytes, dns_name, info.ip_packet.source_ip, specific_info
+        info.received_bytes, dns_name, info.ip_source_ip, specific_info
     )
 }
 
 fn packet_info(info: &PacketInfo) -> String {
-    match info.packet.tp {
+    match info.icmp_type {
         tp if tp == icmp::PacketType::EchoReply as u8 => format!(
             "icmp_seq={} ttl={} time={}",
-            info.packet.seq,
-            info.ip_packet.ttl,
+            info.icmp_seq,
+            info.ip_ttl,
             display_duration(info.time)
         ),
         tp if tp == icmp::PacketType::TimeExceeded as u8 => {
-            format!("icmp_seq={} Time to live exceeded", info.packet.seq)
+            format!("icmp_seq={} Time to live exceeded", info.icmp_seq)
         }
         _ => String::from("Pss: Unimplemented :("),
     }

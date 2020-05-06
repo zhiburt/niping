@@ -17,26 +17,10 @@ impl From<std::io::Error> for PacketError {
 }
 
 pub trait Packet<'a> {
-    fn build(&self, buf: &mut [u8]) -> Result<usize>;
+    fn build(&self) -> &[u8];
     fn parse(buf: &'a [u8]) -> Result<Self>
     where
         Self: std::marker::Sized;
-
-    fn verify(_: &'a [u8]) -> Result<()> {
-        Ok(())
-    }
-
-    fn parse_verified(buf: &'a [u8]) -> Result<Self>
-    where
-        Self: std::marker::Sized,
-    {
-        Self::verify(buf)?;
-        Self::parse(buf)
-    }
-
-    fn hint_size(&self) -> Option<usize> {
-        None
-    }
 }
 
 pub mod icmp;

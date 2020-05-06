@@ -1,4 +1,5 @@
 use super::{Packet, PacketError, Result};
+use std::borrow::Cow;
 
 pub enum PacketType {
     EchoReply = 0,
@@ -7,59 +8,83 @@ pub enum PacketType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct ICMPacket {
-    pub tp: u8,
-    pub code: u8,
-    pub ident: u16,
-    pub seq: u16,
-    pub payload: Option<Vec<u8>>,
+pub struct ICMPacket<'a> {
+    buf: Cow<'a, [u8]>,
 }
 
 const MINIMUM_HEADER_SIZE: usize = 8;
 
-impl ICMPacket {
+impl ICMPacket<'_> {
     pub fn new(tp: u8, code: u8, ident: u16, seq: u16) -> Self {
         Self {
-            tp,
-            code,
-            ident,
-            seq,
-            payload: None,
+            buf: Cow::Owned(vec![
+                tp,
+                code,
+                0,
+                0,
+                (ident >> 8) as u8,
+                ident as u8,
+                (seq >> 8) as u8,
+                seq as u8,
+            ]),
         }
     }
 
-    pub fn add_payload(&mut self, payload: &[u8]) {
-        self.payload = Some(payload.to_vec());
+    pub fn with_payload(mut self, payload: &[u8]) -> Self {
+        use std::io::Write;
+        self.buf.to_mut().write(payload).unwrap();
+        self
+    }
+
+    // todo: if we support icmpv6 we should store the checksum function
+    // by function sign_by and here call it
+    pub fn sign(mut self) -> Self {
+        self.buf.to_mut()[2] = 0;
+        self.buf.to_mut()[3] = 0;
+
+        let checksum = checksum(&self.buf);
+        self.buf.to_mut()[2] = (checksum >> 8) as u8;
+        self.buf.to_mut()[3] = checksum as u8;
+
+        self
+    }
+
+    pub fn tp(&self) -> u8 {
+        self.buf[0]
+    }
+
+    pub fn code(&self) -> u8 {
+        self.buf[1]
+    }
+
+    pub fn ident(&self) -> u16 {
+        (u16::from(self.buf[4]) << 8) + self.buf[5] as u16
+    }
+
+    pub fn seq(&self) -> u16 {
+        (u16::from(self.buf[6]) << 8) + self.buf[7] as u16
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.buf[8..]
+    }
+
+    pub fn set_seq(&mut self, seq: u16) {
+        self.buf.to_mut()[6] = (seq >> 8) as u8;
+        self.buf.to_mut()[7] = seq as u8;
+    }
+
+    pub fn is_checksum_correct(&self) -> bool {
+        match checksum(&self.buf) {
+            0 => true,
+            _ => false,
+        }
     }
 }
 
-impl<'a> Packet<'a> for ICMPacket {
-    fn build(&self, buff: &mut [u8]) -> Result<usize> {
-        buff[0] = self.tp;
-        buff[1] = self.code;
-        buff[4] = (self.ident >> 8) as u8;
-        buff[5] = self.ident as u8;
-        buff[6] = (self.seq >> 8) as u8;
-        buff[7] = self.seq as u8;
-
-        if let Some(payload) = &self.payload {
-            use std::io::Write;
-            (&mut buff[8..]).write(payload)?;
-        }
-
-        buff[2] = 0;
-        buff[3] = 0;
-
-        let checksum = checksum(buff);
-        buff[2] = (checksum >> 8) as u8;
-        buff[3] = checksum as u8;
-
-        Ok(self.hint_size().unwrap())
-    }
-
-    fn hint_size(&self) -> Option<usize> {
-        let payload_size = self.payload.as_ref().map_or(0, |p| p.len());
-        Some(MINIMUM_HEADER_SIZE + payload_size)
+impl<'a> Packet<'a> for ICMPacket<'a> {
+    fn build(&self) -> &[u8] {
+        &self.buf
     }
 
     fn parse(buf: &'a [u8]) -> Result<Self>
@@ -70,26 +95,9 @@ impl<'a> Packet<'a> for ICMPacket {
             return Err(PacketError::InvalidBufferSize);
         }
 
-        let tp = buf[0];
-        let code = buf[1];
-
-        let ident = (u16::from(buf[4]) << 8) + buf[5] as u16;
-        let seq_count = (u16::from(buf[6]) << 8) + buf[7] as u16;
-
-        let mut header = Self::new(tp, code, ident, seq_count);
-        if buf.len() > 8 {
-            header.add_payload(&buf[8..]);
-        }
-        Ok(header)
-    }
-
-    fn verify(buf: &'a [u8]) -> Result<()> {
-        let checksum = checksum(buf);
-        if checksum != 0 {
-            return Err(PacketError::ChecksumFailed);
-        }
-
-        Ok(())
+        Ok(Self {
+            buf: Cow::Borrowed(buf),
+        })
     }
 }
 
@@ -115,7 +123,7 @@ pub fn checksum(buf: &[u8]) -> u16 {
 pub struct EchoRequest;
 
 impl EchoRequest {
-    pub fn new(ident: u16, seq: u16) -> ICMPacket {
+    pub fn new<'a>(ident: u16, seq: u16) -> ICMPacket<'a> {
         ICMPacket::new(PacketType::EchoRequest as u8, 0, ident, seq)
     }
 }
@@ -133,30 +141,9 @@ mod tests {
 
     #[test]
     fn build() {
-        let p = ICMPacket::new(20, 0, 2020, 24);
-        let mut buf = [0; 8];
-        let res = p.build(&mut buf);
-        assert!(res.is_ok());
-        assert_eq!([20, 0, 228, 3, 7, 228, 0, 24], buf);
-    }
-
-    #[test]
-    fn build_cleaning_checksum_bytes() {
-        let p = ICMPacket::new(20, 0, 2020, 24);
-        let mut buf = [0; 8];
-        buf[2] = 1;
-        buf[3] = 2;
-        let res = p.build(&mut buf);
-        assert!(res.is_ok());
-        assert_eq!([20, 0, 228, 3, 7, 228, 0, 24], buf);
-    }
-
-    #[test]
-    #[should_panic]
-    fn build_in_small_buffer() {
-        let p = ICMPacket::new(20, 0, 2020, 24);
-        let mut buf = [0; 3];
-        p.build(&mut buf);
+        let p = ICMPacket::new(20, 0, 2020, 24).sign();
+        let res = p.build();
+        assert_eq!([20, 0, 228, 3, 7, 228, 0, 24], res);
     }
 
     #[test]
@@ -165,7 +152,7 @@ mod tests {
         let p = ICMPacket::parse(&buf);
 
         assert!(p.is_ok());
-        assert_eq!(ICMPacket::new(20, 0, 2020, 24), p.unwrap());
+        assert_eq!(ICMPacket::new(20, 0, 2020, 24).sign(), p.unwrap());
     }
 
     #[test]
@@ -179,11 +166,13 @@ mod tests {
     #[test]
     fn secure_parse() {
         let mut buf = [20, 0, 228, 3, 7, 228, 0, 24];
-        let p = ICMPacket::parse_verified(&buf);
+        let p = ICMPacket::parse(&buf);
         assert!(p.is_ok());
+        assert!(p.unwrap().is_checksum_correct());
 
         buf[2] = 0;
-        let p = ICMPacket::parse_verified(&buf);
-        assert!(p.is_err());
+        let p = ICMPacket::parse(&buf);
+        assert!(p.is_ok());
+        assert!(!p.unwrap().is_checksum_correct());
     }
 }
