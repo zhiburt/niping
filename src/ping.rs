@@ -1,8 +1,8 @@
 use crate::{
     packet::{
-        icmp::{self, ICMPacket},
+        icmp::{self, IcmpBuilder, IcmpPacket},
         ip::IPV4Packet,
-        Packet, PacketError,
+        Builder, Packet, PacketError,
     },
     stats::PacketInfo,
 };
@@ -79,15 +79,16 @@ pub struct Ping {
 
 impl Ping {
     pub fn ping_loop(self, stats: Sender<Result<PacketInfo>>, terminated: Arc<AtomicBool>) {
-        let mut req = icmp::EchoRequest::new(uniq_ident(), 0).with_payload(&uniq_payload());
+        let payload = uniq_payload();
+        let mut req = icmp::EchoRequest::new(uniq_ident(), 0).with_payload(&payload);
 
         let mut packets_limit = self.packets_limit;
         let mut buf = vec![0; 300];
         while terminated.load(Ordering::SeqCst) {
-            req.set_seq(req.seq() + 1);
-            req = req.sign();
+            req.seq += 1;
+            let size = req.build(&mut buf).unwrap();
 
-            self.send_to(req.build()).unwrap();
+            self.send_to(&buf[..size]).unwrap();
             let info = self.recv(&req, &mut buf);
 
             stats.send(Ok(info)).unwrap();
@@ -103,13 +104,13 @@ impl Ping {
         }
     }
 
-    fn recv(&self, req: &ICMPacket, mut buf: &mut [u8]) -> PacketInfo {
+    fn recv(&self, req: &IcmpBuilder, mut buf: &mut [u8]) -> PacketInfo {
         let now = time::Instant::now();
         loop {
             let received_bytes = self.sock.recv(&mut buf).unwrap();
             let time = now.elapsed();
             let ip = IPV4Packet::parse(&buf[..received_bytes]).unwrap();
-            let repl = ICMPacket::parse(&ip.payload()).unwrap();
+            let repl = IcmpPacket::parse(&ip.payload()).unwrap();
             if own_packet(&req, &repl) {
                 break PacketInfo {
                     ip_source_ip: std::net::IpAddr::from(ip.source_ip()),
@@ -128,12 +129,12 @@ impl Ping {
     }
 }
 
-fn own_packet(req: &ICMPacket, repl: &ICMPacket) -> bool {
+fn own_packet(req: &IcmpBuilder, repl: &IcmpPacket) -> bool {
     match repl.tp() {
-        tp if tp == icmp::PacketType::EchoReply as u8 => req.payload() == repl.payload(),
+        tp if tp == icmp::PacketType::EchoReply as u8 => req.payload.unwrap() == repl.payload(),
         tp if tp == icmp::PacketType::TimeExceeded as u8 => {
             let ip = IPV4Packet::parse(repl.payload()).unwrap();
-            let icmp = icmp::ICMPacket::parse(&ip.payload()).unwrap();
+            let icmp = IcmpPacket::parse(&ip.payload()).unwrap();
 
             // even though we might have to verify payload according to rhe rfc-792,
             // there are gateways that not include the payload in internal icmp header
@@ -142,7 +143,7 @@ fn own_packet(req: &ICMPacket, repl: &ICMPacket) -> bool {
             //
             // rfc792  page 8
             // rfc1812 section 4.3.2.3
-            icmp.ident() == req.ident()
+            icmp.ident() == req.ident
         }
         _ => true, // unimplemented
     }

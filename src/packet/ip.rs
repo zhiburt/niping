@@ -1,13 +1,9 @@
+use super::{Builder, Packet, PacketError, Result};
 use std::net::Ipv4Addr;
-use super::{Packet, PacketError, Result};
-
-pub enum IPacket<'a> {
-    V4(IPV4Packet<'a>),
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct IPV4Packet<'a> {
-    buf: &'a [u8]
+    buf: &'a [u8],
 }
 
 impl IPV4Packet<'_> {
@@ -39,9 +35,7 @@ const IPV4_VERSION: u8 = 4;
 const MINIMUM_HEADER_SIZE: usize = 20;
 
 impl<'a> Packet<'a> for IPV4Packet<'a> {
-    fn build(&self) -> &[u8] {
-        unimplemented!()
-    }
+    type Builder = IPV4Builder;
 
     fn parse(buf: &'a [u8]) -> Result<Self>
     where
@@ -62,6 +56,14 @@ impl<'a> Packet<'a> for IPV4Packet<'a> {
         }
 
         Ok(Self { buf })
+    }
+}
+
+pub struct IPV4Builder;
+
+impl Builder for IPV4Builder {
+    fn build(&self, _: &mut [u8]) -> Result<usize> {
+        unimplemented!()
     }
 }
 
@@ -112,7 +114,7 @@ mod tests {
     fn parse_incorrect_packet_size_field() {
         let (mut buf, _) = setup();
         buf[0] = (4 << 4) + ((buf.len() / 4) as u8 + 1);
-        
+
         let p = IPV4Packet::parse(&buf);
 
         assert!(p.is_err());

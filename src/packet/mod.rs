@@ -16,11 +16,17 @@ impl From<std::io::Error> for PacketError {
     }
 }
 
-pub trait Packet<'a> {
-    fn build(&self) -> &[u8];
-    fn parse(buf: &'a [u8]) -> Result<Self>
-    where
-        Self: std::marker::Sized;
+pub(crate) trait Builder {
+    fn build(&self, _: &mut [u8]) -> Result<usize>;
+}
+
+pub(crate) trait Packet<'a>
+where
+    Self: Sized,
+{
+    type Builder: Builder;
+
+    fn parse(_: &'a [u8]) -> Result<Self>; 
 }
 
 pub mod icmp;
