@@ -67,7 +67,7 @@ pub struct IcmpBuilder<'a> {
 }
 
 impl<'a> IcmpBuilder<'a> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Default::default()
     }
 
