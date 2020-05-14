@@ -1,6 +1,6 @@
 use crate::{
     packet::{
-        icmp::{self, IcmpBuilder, IcmpPacket},
+        icmp::{self, IcmpBuilder, IcmpPacket, PacketType},
         ip::IPV4Packet,
         Builder, Packet, PacketError,
     },
@@ -130,9 +130,9 @@ impl Ping {
 }
 
 fn own_packet(req: &IcmpBuilder, repl: &IcmpPacket) -> bool {
-    match repl.tp() {
-        tp if tp == icmp::PacketType::EchoReply as u8 => req.payload.unwrap() == repl.payload(),
-        tp if tp == icmp::PacketType::TimeExceeded as u8 => {
+    match PacketType::new(repl.tp()) {
+        Some(PacketType::EchoReply) => req.payload.unwrap() == repl.payload(),
+        Some(PacketType::TimeExceeded) => {
             let ip = IPV4Packet::parse(repl.payload()).unwrap();
             let icmp = IcmpPacket::parse(&ip.payload()).unwrap();
 

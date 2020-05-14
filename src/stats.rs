@@ -4,7 +4,7 @@ use std::time::{self, Duration};
 use trust_dns_resolver::Resolver;
 
 use crate::{
-    packet::icmp,
+    packet::icmp::PacketType,
     ping::{Result, DATA_SIZE},
 };
 
@@ -46,7 +46,7 @@ impl Statistics {
         while let Ok(Ok(info)) = packet.recv() {
             transmitted += 1;
             rtt.push(info.time);
-            if info.icmp_type == icmp::PacketType::EchoReply as u8 {
+            if let Some(PacketType::EchoReply) = PacketType::new(info.icmp_type) {
                 received += 1;
             }
 
@@ -89,17 +89,36 @@ fn display_packet(info: PacketInfo) -> String {
 }
 
 fn packet_info(info: &PacketInfo) -> String {
-    match info.icmp_type {
-        tp if tp == icmp::PacketType::EchoReply as u8 => format!(
+    use PacketType::*;
+    match PacketType::new(info.icmp_type) {
+        Some(EchoReply) => format!(
             "icmp_seq={} ttl={} time={}",
             info.icmp_seq,
             info.ip_ttl,
             display_duration(info.time)
         ),
-        tp if tp == icmp::PacketType::TimeExceeded as u8 => {
-            format!("icmp_seq={} Time to live exceeded", info.icmp_seq)
+        Some(ref tp) => {
+            let message = match tp {
+                TimeExceeded => "time to live exceeded",
+                DestinationUnreachable => "destination unreachable",
+                ParameterProblem => "parameter problem",
+                RedirectMessage => "redirect message",
+                RouterAdvertisement => "router advertisement",
+                RouterSolicitation => "router solicitation",
+                Timestamp => "timestamp",
+                TimestampReply => "timestamp reply",
+                ExtendedEchoReply => "extended echo reply",
+                EchoRequest => "echo request",
+                ExtendedEchoRequest => "extended echo request",
+                EchoReply => "echo reply",
+            };
+
+            format!("icmp_seq={} {}", info.icmp_seq, message)
         }
-        _ => String::from("Pss: Unimplemented :("),
+        None => format!(
+            "icmp_seq={}, nonstandard packet {}",
+            info.icmp_seq, info.icmp_type
+        ),
     }
 }
 
