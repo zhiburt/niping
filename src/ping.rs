@@ -145,6 +145,13 @@ fn own_packet(req: &IcmpBuilder, repl: &IcmpPacket) -> bool {
             // rfc1812 section 4.3.2.3
             icmp.ident() == req.ident
         }
+        Some(PacketType::EchoRequest)
+            if req.payload == Some(repl.payload()) && req.ident == repl.ident() =>
+        {
+            // req == replay
+            // most likely we ping localhost so we should skip our own request
+            false
+        }
         _ => true, // unimplemented
     }
 }
