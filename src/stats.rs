@@ -5,7 +5,7 @@ use trust_dns_resolver::Resolver;
 
 use crate::{
     packet::icmp::PacketType,
-    ping::{Result, DATA_SIZE},
+    ping::{PingError, Result, DATA_SIZE},
 };
 
 pub struct Statistics {
@@ -43,14 +43,21 @@ impl Statistics {
             self.addr, self.resource_name, self.data_size
         );
 
-        while let Ok(Ok(info)) = packet.recv() {
-            transmitted += 1;
-            rtt.push(info.time);
-            if let Some(PacketType::EchoReply) = PacketType::new(info.icmp_type) {
-                received += 1;
-            }
+        while let Ok(info) = packet.recv() {
+            match info {
+                Ok(info) => {
+                    transmitted += 1;
+                    rtt.push(info.time);
+                    if let Some(PacketType::EchoReply) = PacketType::new(info.icmp_type) {
+                        received += 1;
+                    }
 
-            println!("{}", display_packet(info));
+                    println!("{}", display_packet(info));
+                }
+                Err(PingError::Send(err)) => println!("send: {}", io_error_to_string(err)),
+                Err(PingError::Recv(err)) => println!("recv: {}", io_error_to_string(err)),
+                Err(PingError::PacketError(..)) => println!("internal error"),
+            }
         }
 
         let time = time.elapsed();
@@ -135,4 +142,8 @@ fn reverse_address(addr: IpAddr) -> Option<String> {
     }
 
     None
+}
+
+fn io_error_to_string(err: std::io::Error) -> String {
+    format!("{}", err).to_lowercase()
 }

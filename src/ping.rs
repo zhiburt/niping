@@ -22,13 +22,8 @@ pub type Result<T> = std::result::Result<T, PingError>;
 #[derive(Debug)]
 pub enum PingError {
     PacketError(PacketError),
-    IO(io::Error),
-}
-
-impl From<io::Error> for PingError {
-    fn from(e: io::Error) -> Self {
-        Self::IO(e)
-    }
+    Send(io::Error),
+    Recv(io::Error),
 }
 
 impl From<PacketError> for PingError {
@@ -86,12 +81,9 @@ impl Ping {
         let mut buf = vec![0; 300];
         while terminated.load(Ordering::SeqCst) {
             req.seq += 1;
-            let size = req.build(&mut buf).unwrap();
 
-            self.send_to(&buf[..size]).unwrap();
-            let info = self.recv(&req, &mut buf);
-
-            stats.send(Ok(info)).unwrap();
+            let info = self.ping(&mut buf, &req);
+            stats.send(info).unwrap();
 
             if let Some(ref mut limit) = packets_limit {
                 *limit -= 1;
@@ -104,22 +96,32 @@ impl Ping {
         }
     }
 
-    fn recv(&self, req: &IcmpBuilder, mut buf: &mut [u8]) -> PacketInfo {
+    fn ping(&self, mut buf: &mut [u8], req: &IcmpBuilder) -> Result<PacketInfo> {
+        let size = req.build(&mut buf).unwrap();
+        self.send_to(&buf[..size])
+            .map_err(|err| PingError::Send(err))?;
+        self.recv(&req, &mut buf)
+    }
+
+    fn recv(&self, req: &IcmpBuilder, mut buf: &mut [u8]) -> Result<PacketInfo> {
         let now = time::Instant::now();
         loop {
-            let received_bytes = self.sock.recv(&mut buf).unwrap();
+            let received_bytes = self
+                .sock
+                .recv(&mut buf)
+                .map_err(|err| PingError::Recv(err))?;
             let time = now.elapsed();
             let ip = IPV4Packet::parse(&buf[..received_bytes]).unwrap();
             let repl = IcmpPacket::parse(&ip.payload()).unwrap();
             if own_packet(&req, &repl) {
-                break PacketInfo {
+                break Ok(PacketInfo {
                     ip_source_ip: std::net::IpAddr::from(ip.source_ip()),
                     ip_ttl: ip.ttl(),
                     icmp_seq: repl.seq(),
                     icmp_type: repl.tp(),
                     received_bytes: received_bytes,
                     time: time,
-                };
+                });
             }
         }
     }
