@@ -49,10 +49,47 @@ impl AsRef<[u8]> for IcmpPacket<'_> {
     }
 }
 
+/// PacketType is a representation of icmp messages types.
+///
+/// It doesn't include deprecated types
+/// https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol
+#[derive(Clone, Copy)]
 pub enum PacketType {
     EchoReply = 0,
+    DestinationUnreachable = 3,
+    RedirectMessage = 5,
     EchoRequest = 8,
+    RouterAdvertisement = 9,
+    RouterSolicitation = 10,
     TimeExceeded = 11,
+    ParameterProblem = 12,
+    Timestamp = 13,
+    TimestampReply = 14,
+    ExtendedEchoRequest = 42,
+    ExtendedEchoReply = 43,
+}
+
+impl PacketType {
+    pub fn new(t: u8) -> Option<PacketType> {
+        use PacketType::*;
+        [
+            EchoReply,
+            DestinationUnreachable,
+            RedirectMessage,
+            EchoRequest,
+            RouterAdvertisement,
+            RouterSolicitation,
+            TimeExceeded,
+            ParameterProblem,
+            Timestamp,
+            TimestampReply,
+            ExtendedEchoRequest,
+            ExtendedEchoReply,
+        ]
+        .iter()
+        .find(|&&tt| t == tt as u8)
+        .cloned()
+    }
 }
 
 const MINIMUM_HEADER_SIZE: usize = 8;
