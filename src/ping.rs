@@ -4,10 +4,10 @@ use crate::{
         ip::IPV4Packet,
         Builder, Packet, PacketError,
     },
+    socket::{Socket, Socket2},
     stats::PacketInfo,
 };
 use crossbeam::channel::Sender;
-use socket2::{SockAddr, Socket};
 use std::io;
 use std::net;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,23 +41,23 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn build(self) -> Ping {
-        let sock = open_socket(&self.addr);
-        sock.set_read_timeout(Some(
-            self.read_timeout
-                .map_or(Duration::from_secs(10), |s| Duration::from_secs(s as u64)),
-        ))
-        .unwrap();
+    pub fn build(self) -> Ping<Socket2> {
+        let mut sock = Socket2::icmp();
+        sock.as_mut()
+            .set_read_timeout(Some(
+                self.read_timeout
+                    .map_or(Duration::from_secs(10), |s| Duration::from_secs(s as u64)),
+            ))
+            .unwrap();
 
         if let Some(ttl) = self.ttl {
-            sock.set_ttl(ttl).unwrap();
+            sock.as_mut().set_ttl(ttl).unwrap();
         }
 
         let send_interval = self.send_interval.map_or(Duration::from_secs(1), |i| i);
-        let sock_addr = socket_address(self.addr);
 
         Ping {
-            addr: sock_addr,
+            addr: std::net::SocketAddr::new(self.addr, 0),
             sock: sock,
             send_interval: send_interval,
             packets_limit: self.packets_limit,
@@ -65,14 +65,14 @@ impl Settings {
     }
 }
 
-pub struct Ping {
-    addr: SockAddr,
-    sock: Socket,
+pub struct Ping<S: Socket> {
+    addr: std::net::SocketAddr,
+    sock: S,
     send_interval: Duration,
     packets_limit: Option<usize>,
 }
 
-impl Ping {
+impl<S: Socket> Ping<S> {
     pub fn ping_loop(self, stats: Sender<Result<PacketInfo>>, terminated: Arc<AtomicBool>) {
         let payload = uniq_payload();
         let mut req = icmp::EchoRequest::new(uniq_ident(), 0).with_payload(&payload);
@@ -156,19 +156,6 @@ fn own_packet(req: &IcmpBuilder, repl: &IcmpPacket) -> bool {
         }
         _ => true, // unimplemented
     }
-}
-
-fn open_socket(addr: &net::IpAddr) -> socket2::Socket {
-    socket2::Socket::new(
-        socket2::Domain::ipv4(),
-        socket2::Type::raw(),
-        Some(socket2::Protocol::icmpv4()),
-    )
-    .unwrap()
-}
-
-fn socket_address(addr: net::IpAddr) -> socket2::SockAddr {
-    socket2::SockAddr::from(net::SocketAddr::new(addr, 0))
 }
 
 fn uniq_payload() -> Vec<u8> {
