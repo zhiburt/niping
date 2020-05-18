@@ -112,7 +112,7 @@ impl<S: Socket> Ping<S> {
                 .map_err(|err| PingError::Recv(err))?;
             let time = now.elapsed();
             let ip = IPV4Packet::parse(&buf[..received_bytes]).unwrap();
-            let repl = IcmpPacket::parse(&ip.payload()).unwrap();
+            let repl = IcmpPacket::parse(ip.payload().unwrap()).unwrap();
             if own_packet(&req, &repl) {
                 break Ok(PacketInfo {
                     ip_source_ip: std::net::IpAddr::from(ip.source_ip()),
@@ -136,7 +136,7 @@ fn own_packet(req: &IcmpBuilder, repl: &IcmpPacket) -> bool {
         Some(PacketType::EchoReply) => req.payload.unwrap() == repl.payload(),
         Some(PacketType::TimeExceeded) => {
             let ip = IPV4Packet::parse(repl.payload()).unwrap();
-            let icmp = IcmpPacket::parse(&ip.payload()).unwrap();
+            let icmp = IcmpPacket::parse(ip.payload().unwrap()).unwrap();
 
             // even though we might have to verify payload according to rhe rfc-792,
             // there are gateways that not include the payload in internal icmp header
