@@ -169,3 +169,185 @@ fn uniq_payload() -> Vec<u8> {
 fn uniq_ident() -> u16 {
     rand::random()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::ip::{IPV4Builder, Protocol};
+    use crossbeam::channel::unbounded;
+    use std::{cell::RefCell, collections::HashMap, io, net};
+
+    #[test]
+    fn ping() {
+        let ping = default_ping();
+        let packet_limit = 10;
+        let info = sandbox(ping, packet_limit);
+
+        assert_eq!(info.len(), packet_limit);
+        assert!(info.iter().all(|p| p.is_ok()))
+    }
+
+    #[test]
+    fn ping_limited() {
+        let packets_count = 5;
+        let mut ping = default_ping();
+        ping.packets_limit = Some(packets_count);
+        let packet_limit = 10;
+        let info = sandbox(ping, packet_limit);
+
+        assert_eq!(info.len(), packets_count);
+        assert!(info.iter().all(|p| p.is_ok()))
+    }
+
+    #[test]
+    fn ping_send_error() {
+        let mut ping = default_ping();
+        ping.sock
+            .raise_send_error(1, io::Error::from(io::ErrorKind::Other));
+        let packet_limit = 10;
+        let info = sandbox(ping, packet_limit);
+
+        assert_eq!(info.len(), packet_limit);
+        assert!(
+            matches!(&info[1], Err(PingError::Send(err)) if err.kind() == io::ErrorKind::Other)
+        );
+    }
+
+    #[test]
+    fn ping_recv_error() {
+        let mut ping = default_ping();
+        ping.sock
+            .raise_recv_error(1, io::Error::from(io::ErrorKind::Other));
+        let packet_limit = 10;
+        let info = sandbox(ping, packet_limit);
+
+        assert_eq!(info.len(), packet_limit);
+        assert!(
+            matches!(&info[1], Err(PingError::Recv(err)) if err.kind() == io::ErrorKind::Other)
+        );
+    }
+
+    fn sandbox<S: Socket + Send + 'static>(ping: Ping<S>, limit: usize) -> Vec<Result<PacketInfo>> {
+        let (sender, recv) = unbounded();
+        let term = Arc::new(AtomicBool::new(true));
+        let ping_term = term.clone();
+        let pinger = thread::spawn(move || ping.ping_loop(sender, ping_term));
+
+        let mut limit = limit;
+        let mut packets = Vec::new();
+        while let Ok(info) = recv.recv() {
+            packets.push(info);
+
+            if limit != 1 {
+                limit -= 1;
+            } else {
+                term.store(false, Ordering::Relaxed);
+                break;
+            }
+        }
+
+        pinger.join().unwrap();
+
+        packets
+    }
+
+    fn default_ping() -> Ping<TestSocket> {
+        Ping {
+            addr: net::SocketAddr::new(net::IpAddr::V4(net::Ipv4Addr::UNSPECIFIED), 0),
+            packets_limit: None,
+            send_interval: Duration::from_secs(0),
+            sock: TestSocket::new(),
+        }
+    }
+
+    struct TestSocket {
+        send: RefCell<usize>,
+        received: RefCell<usize>,
+        send_errors: RefCell<HashMap<usize, io::Error>>,
+        recv_errors: RefCell<HashMap<usize, io::Error>>,
+        last_sent_ident: RefCell<u16>,
+        last_sent_playground: RefCell<Vec<u8>>,
+    }
+
+    impl Socket for TestSocket {
+        fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+            if self
+                .recv_errors
+                .borrow()
+                .contains_key(&self.received.borrow())
+            {
+                return Err(self
+                    .recv_errors
+                    .borrow_mut()
+                    .remove(&self.received.borrow())
+                    .unwrap());
+            }
+
+            *self.received.borrow_mut() += 1;
+
+            let size = self.emulate_recv(buf);
+            Ok(size)
+        }
+
+        fn send_to(&self, buf: &[u8], addr: &net::SocketAddr) -> io::Result<usize> {
+            if self.send_errors.borrow().contains_key(&self.send.borrow()) {
+                return Err(self
+                    .send_errors
+                    .borrow_mut()
+                    .remove(&self.send.borrow())
+                    .unwrap());
+            }
+
+            *self.send.borrow_mut() += 1;
+
+            let icmp = IcmpPacket::parse(buf).unwrap();
+
+            *self.last_sent_ident.borrow_mut() = icmp.ident();
+            *self.last_sent_playground.borrow_mut() = icmp.payload().to_vec();
+
+            Ok(buf.len())
+        }
+    }
+
+    impl TestSocket {
+        fn new() -> Self {
+            Self {
+                last_sent_ident: RefCell::new(0),
+                last_sent_playground: RefCell::new(Vec::new()),
+                received: RefCell::new(0),
+                send: RefCell::new(0),
+                send_errors: RefCell::new(HashMap::new()),
+                recv_errors: RefCell::new(HashMap::new()),
+            }
+        }
+
+        fn emulate_recv(&self, buf: &mut [u8]) -> usize {
+            let mut icmp_buf = [0; 1024];
+            let icmp_size = IcmpBuilder::new()
+                .with_ident(*self.last_sent_ident.borrow())
+                .with_payload(&*self.last_sent_playground.borrow())
+                .build(&mut icmp_buf)
+                .unwrap();
+
+            let size = IPV4Builder::new(
+                0,
+                Protocol::ICMP,
+                net::Ipv4Addr::new(0, 0, 0, 0),
+                net::Ipv4Addr::new(127, 0, 0, 1),
+                &icmp_buf[..icmp_size],
+            )
+            .build(buf)
+            .unwrap();
+
+            size
+        }
+
+        fn raise_send_error(&mut self, op_index: usize, err: io::Error) {
+            self.send_errors.borrow_mut().insert(op_index, err);
+        }
+
+        fn raise_recv_error(&mut self, op_index: usize, err: io::Error) {
+            self.recv_errors.borrow_mut().insert(op_index, err);
+        }
+    }
+}
