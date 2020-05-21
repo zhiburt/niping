@@ -1,12 +1,8 @@
 use rexpect::{errors::*, process::wait::WaitStatus, spawn};
 
 fn run(addr: &str, params: &[&str], packet_limit: usize) -> Result<usize> {
-    let params = if params.is_empty() {
-        "".to_owned()
-    } else {
-        " ".to_owned() + &params.join(" ")
-    };
-    let command = format!("./target/debug/niping {}{}", addr, params);
+    let params = params.join(" ");
+    let command = format!("./target/debug/niping {} {}", addr, params);
     let mut p = spawn(&command, Some(30_000))?;
     p.exp_regex("PING.*\n")?;
 

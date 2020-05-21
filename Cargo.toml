@@ -12,5 +12,5 @@ crossbeam = "0.7.3"
 ctrlc = "3.1.4"
 rand = "0.7.3"
 
-[dev-dependencies]
-rexpect = "0.3"
+[dev-dependencies.rexpect]
+git = "https://github.com/philippkeller/rexpect"
