@@ -3,7 +3,7 @@ use super::{Builder, Packet, PacketError, Result};
 pub struct IcmpPacket<'a>(&'a [u8]);
 
 impl<'a> Packet<'a> for IcmpPacket<'a> {
-    type Builder = IcmpBuilder<'a>;
+    type Builder = IcmpBuilder;
 
     fn parse(buf: &'a [u8]) -> Result<Self> {
         if buf.len() < MINIMUM_HEADER_SIZE {
@@ -95,15 +95,15 @@ impl PacketType {
 const MINIMUM_HEADER_SIZE: usize = 8;
 
 #[derive(Default)]
-pub struct IcmpBuilder<'a> {
+pub struct IcmpBuilder {
     pub tp: u8,
     pub code: u8,
     pub seq: u16,
     pub ident: u16,
-    pub payload: Option<&'a [u8]>,
+    pub payload: Option<Vec<u8>>,
 }
 
-impl<'a> IcmpBuilder<'a> {
+impl IcmpBuilder {
     pub fn new() -> Self {
         Default::default()
     }
@@ -128,17 +128,17 @@ impl<'a> IcmpBuilder<'a> {
         self
     }
 
-    pub fn with_payload(mut self, buf: &'a [u8]) -> Self {
-        self.payload = Some(buf);
+    pub fn with_payload(mut self, buf: &[u8]) -> Self {
+        self.payload = Some(buf.to_vec());
         self
     }
 
     fn hint_size(&self) -> usize {
-        MINIMUM_HEADER_SIZE + self.payload.map_or(0, |p| p.len())
+        MINIMUM_HEADER_SIZE + self.payload.as_ref().map_or(0, |p| p.len())
     }
 }
 
-impl Builder for IcmpBuilder<'_> {
+impl Builder for IcmpBuilder {
     fn build(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < self.hint_size() {
             return Err(PacketError::InvalidBufferSize);
@@ -194,7 +194,7 @@ pub fn checksum(buf: &[u8]) -> u16 {
 pub struct EchoRequest;
 
 impl EchoRequest {
-    pub fn new<'a>(ident: u16, seq: u16) -> IcmpBuilder<'a> {
+    pub fn new(ident: u16, seq: u16) -> IcmpBuilder {
         IcmpBuilder::new()
             .with_type(PacketType::EchoRequest as u8)
             .with_code(0)
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(65015, sum);
     }
 
-    fn default_setup<'a>() -> (Vec<u8>, IcmpBuilder<'a>) {
+    fn default_setup() -> (Vec<u8>, IcmpBuilder) {
         let buffer = vec![20, 0, 228, 3, 7, 228, 0, 24];
         let builder = IcmpBuilder::new()
             .with_type(20)
