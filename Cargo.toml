@@ -8,9 +8,9 @@ edition = "2018"
 trust-dns-resolver = "*"
 socket2 = "*"
 clap = { git = "https://github.com/clap-rs/clap/", rev = "aae96236b27d43ede24bd7e58668786cd1073c21" }
-crossbeam = "0.7.3"
 ctrlc = "3.1.4"
 rand = "0.7.3"
+smol = "0.1.10"
 
 [dev-dependencies.rexpect]
 git = "https://github.com/philippkeller/rexpect"
