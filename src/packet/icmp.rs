@@ -94,7 +94,7 @@ impl PacketType {
 
 const MINIMUM_HEADER_SIZE: usize = 8;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct IcmpBuilder {
     pub tp: u8,
     pub code: u8,
