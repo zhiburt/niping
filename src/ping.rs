@@ -172,3 +172,178 @@ impl AsRawFd for Socket2 {
         self.0.as_raw_fd()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::ip::{self, IPV4Builder};
+    use std::{cell::RefCell, collections::HashMap};
+
+    #[derive(Default)]
+    struct TestSocket {
+        builder: RefCell<IcmpBuilder>,
+        recv_errors: HashMap<usize, io::Error>,
+        send_errors: HashMap<usize, io::Error>,
+        changer: HashMap<usize, Box<fn(&mut IcmpBuilder)>>,
+        recv: usize,
+        send: RefCell<usize>,
+        // test_socket_fd: RefCell<i32>,
+    }
+
+    impl Socket for TestSocket {
+        fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.recv += 1;
+            match self.recv_errors.get(&self.recv) {
+                Some(err) => Err(io::Error::new(err.kind(), err.to_string())),
+                None => {
+                    if let Some(callback) = self.changer.get(&self.recv) {
+                        callback(self.builder.get_mut());
+                    }
+
+                    let mut icmp = [0; 300];
+                    let icmp_size = self.builder.borrow().build(&mut icmp).unwrap();
+                    let ip = IPV4Builder::new(
+                        0,
+                        ip::Protocol::ICMP,
+                        net::Ipv4Addr::LOCALHOST,
+                        net::Ipv4Addr::LOCALHOST,
+                        &icmp[..icmp_size],
+                    );
+                    let send_size = ip.build(buf).unwrap();
+
+                    Ok(send_size)
+                }
+            }
+        }
+
+        fn send(&self, buf: &[u8]) -> io::Result<usize> {
+            *self.send.borrow_mut() += 1;
+            match self.send_errors.get(&self.send.borrow()) {
+                Some(err) => Err(io::Error::new(err.kind(), err.to_string())),
+                None => {
+                    self.builder.borrow_mut().seq += 1;
+                    Ok(buf.len())
+                }
+            }
+        }
+    }
+
+    impl AsRawFd for TestSocket {
+        fn as_raw_fd(&self) -> i32 {
+            // *self.test_socket_fd.borrow_mut() += 1;
+            // *self.test_socket_fd.borrow()
+            0
+        }
+    }
+
+    fn test_ping() -> Ping<TestSocket> {
+        let mut ping = Ping::new(TestSocket::default());
+        ping.sock.get_mut().builder = RefCell::new(ping.req.clone());
+        ping.sock.get_mut().builder.borrow_mut().tp = icmp::PacketType::EchoReply as u8;
+        ping
+    }
+
+    fn counts(ping: &Ping<TestSocket>) -> (usize, usize) {
+        let send_count = *ping.sock.get_ref().send.borrow();
+        let recv_count = ping.sock.get_ref().recv;
+
+        (send_count, recv_count)
+    }
+
+    #[test]
+    pub fn ping() {
+        let mut ping = test_ping();
+
+        for seq in 1..=2 {
+            let packet = smol::block_on(ping.run());
+            assert!(packet.is_ok());
+            assert_eq!(packet.unwrap().icmp_seq, seq);
+        }
+
+        let (send, recv) = counts(&ping);
+        assert_eq!(send, 2);
+        assert_eq!(recv, 2);
+    }
+
+    #[test]
+    pub fn ping_send_error() {
+        let mut ping = test_ping();
+
+        ping.sock
+            .get_mut()
+            .send_errors
+            .insert(2, io::ErrorKind::Other.into());
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_ok());
+        assert_eq!(packet.unwrap().icmp_seq, 1);
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_err());
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_ok());
+        assert_eq!(packet.unwrap().icmp_seq, 2);
+
+        let (send, recv) = counts(&ping);
+        assert_eq!(send, 3);
+        assert_eq!(recv, 2);
+    }
+
+    #[test]
+    pub fn ping_recv_error() {
+        let mut ping = test_ping();
+
+        ping.sock
+            .get_mut()
+            .recv_errors
+            .insert(2, io::ErrorKind::Other.into());
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_ok());
+        assert_eq!(packet.unwrap().icmp_seq, 1);
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_err());
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_ok());
+        assert_eq!(packet.unwrap().icmp_seq, 3);
+
+        let (send, recv) = counts(&ping);
+        assert_eq!(send, 3);
+        assert_eq!(recv, 3);
+    }
+
+    #[test]
+    pub fn ping_recv_unexpected_icmp_packet() {
+        let mut ping = test_ping();
+
+        // spoil the playgound
+        ping.sock.get_mut().changer.insert(
+            2,
+            Box::new(|builder| {
+                builder.payload.as_mut().map(|p| p.reverse());
+            }),
+        );
+
+        ping.sock.get_mut().changer.insert(
+            4,
+            Box::new(|builder| {
+                builder.payload.as_mut().map(|p| p.reverse());
+            }),
+        );
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_ok());
+        assert_eq!(packet.unwrap().icmp_seq, 1);
+
+        let packet = smol::block_on(ping.run());
+        assert!(packet.is_ok());
+        assert_eq!(packet.unwrap().icmp_seq, 2);
+
+        let (send, recv) = counts(&ping);
+        assert_eq!(send, 2);
+        assert_eq!(recv, 4);
+    }
+}
