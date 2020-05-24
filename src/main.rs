@@ -1,15 +1,16 @@
+use niping::{
+    args,
+    packet::icmp::PacketType,
+    ping::{self, PacketInfo, PingError, Socket2, DATA_SIZE},
+};
 use std::{
-    io, net::IpAddr,
+    io,
+    net::IpAddr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::{self, Duration},
-};
-use niping::{
-    packet::icmp::PacketType,
-    ping::{self, PacketInfo, PingError, DATA_SIZE},
-    args,
 };
 use trust_dns_resolver::config::*;
 use trust_dns_resolver::Resolver;
@@ -58,7 +59,7 @@ fn main() {
 }
 
 async fn run(
-    mut ping: ping::Ping,
+    mut ping: ping::Ping<Socket2>,
     wait_time: Duration,
     count_packets: Option<usize>,
     stop: Arc<AtomicBool>,

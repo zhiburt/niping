@@ -3,10 +3,12 @@ use crate::packet::{
     ip::IPV4Packet,
     Builder, Packet, PacketError,
 };
-use socket2::{Domain, Protocol, Socket, Type};
-use std::io;
-use std::net;
-use std::time::{self, Duration};
+use socket2::{Domain, Protocol, Type};
+use std::{
+    io, net,
+    os::unix::io::AsRawFd,
+    time::{self, Duration},
+};
 
 pub const DATA_SIZE: usize = 32;
 
@@ -41,30 +43,34 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn build(self) -> Ping {
-        let sock = Socket::new(Domain::ipv4(), Type::raw(), Some(Protocol::icmpv4())).unwrap();
+    pub fn build(self) -> Ping<Socket2> {
+        let sock =
+            socket2::Socket::new(Domain::ipv4(), Type::raw(), Some(Protocol::icmpv4())).unwrap();
         sock.set_nonblocking(true).unwrap();
         sock.set_read_timeout(Some(self.read_timeout)).unwrap();
         if let Some(ttl) = self.ttl {
             sock.set_ttl(ttl).unwrap();
         }
-        let sock = smol::Async::new(sock).unwrap();
-
-        let payload = uniq_payload();
-        let req = icmp::EchoRequest::new(uniq_ident(), 0).with_payload(&payload);
-
         let addr = std::net::SocketAddr::new(self.addr, 0);
-        Ping { addr, sock, req }
+        let sock = Socket2(sock, addr);
+        Ping::new(sock)
     }
 }
 
-pub struct Ping {
-    addr: net::SocketAddr,
-    sock: smol::Async<Socket>,
+pub struct Ping<S: Socket> {
+    sock: smol::Async<S>,
     req: IcmpBuilder,
 }
 
-impl Ping {
+impl<S: Socket> Ping<S> {
+    fn new(sock: S) -> Self {
+        let payload = uniq_payload();
+        let req = icmp::EchoRequest::new(uniq_ident(), 0).with_payload(&payload);
+        let sock = smol::Async::new(sock).unwrap();
+
+        Self { req, sock }
+    }
+
     pub async fn run(&mut self) -> Result<PacketInfo> {
         let mut buf = vec![0; 300];
         self.req.seq += 1;
@@ -75,7 +81,7 @@ impl Ping {
     async fn ping(&mut self, mut buf: &mut [u8]) -> Result<PacketInfo> {
         let size = self.req.build(&mut buf).unwrap();
         self.sock
-            .write_with(|sock| sock.send_to(&buf[..size], &self.addr.into()))
+            .write_with(|sock| sock.send(&buf[..size]))
             .await
             .map_err(|err| PingError::Send(err))?;
 
@@ -142,4 +148,27 @@ fn uniq_payload() -> Vec<u8> {
 
 fn uniq_ident() -> u16 {
     rand::random()
+}
+
+pub trait Socket: AsRawFd {
+    fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize>;
+    fn send(&self, buf: &[u8]) -> io::Result<usize>;
+}
+
+pub struct Socket2(socket2::Socket, net::SocketAddr);
+
+impl Socket for Socket2 {
+    fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.recv(buf)
+    }
+
+    fn send(&self, buf: &[u8]) -> io::Result<usize> {
+        self.0.send_to(buf, &self.1.into())
+    }
+}
+
+impl AsRawFd for Socket2 {
+    fn as_raw_fd(&self) -> i32 {
+        self.0.as_raw_fd()
+    }
 }
