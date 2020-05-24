@@ -27,6 +27,7 @@ impl IPV4Packet<'_> {
         let size = 4 * (self.buf[0] & 0x0f) as usize;
         match size {
             0 => None,
+            size if size >= self.buf.len() => None,
             _ => Some(&self.buf[size..]),
         }
     }
@@ -108,7 +109,7 @@ impl Builder for IPV4Builder<'_> {
 
         buf.iter_mut().take(size).for_each(|b| *b = 0);
 
-        buf[0] = (4 << 4) + (self.payload.len() / 4) as u8;
+        buf[0] = (4 << 4) + (header_size / 4) as u8;
 
         buf[2] = (size << 8) as u8;
         buf[3] = size as u8;
