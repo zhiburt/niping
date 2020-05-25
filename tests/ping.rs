@@ -8,14 +8,11 @@ fn run(addr: &str, params: &[&str], packet_limit: usize) -> Result<usize> {
 
     let mut count = 0;
     while count != packet_limit {
-        match p.process.status() {
-            Some(WaitStatus::Exited(..)) => break,
-            Some(..) => {
-                p.read_line()?;
-                count += 1
-            }
-            None => unreachable!(),
+        let (line, _) = p.exp_regex("\\n")?;
+        if line == "\r" {
+            break;
         }
+        count += 1
     }
 
     Ok(count)
@@ -50,7 +47,7 @@ fn ping_option_count() {
     let limit = 5;
     let count = 2;
     let packets = run("8.8.8.8", &[&format!("-c {}", count)], limit);
-    assert!(packets.is_ok());
+    // assert!(packets.is_ok());
     assert_eq!(packets.unwrap(), count);
 }
 
