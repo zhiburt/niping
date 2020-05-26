@@ -11,6 +11,7 @@ clap = { git = "https://github.com/clap-rs/clap/", rev = "aae96236b27d43ede24bd7
 ctrlc = "3.1.4"
 rand = "0.7.3"
 smol = "0.1.10"
+async-trait = "0.1.31"
 
 [dev-dependencies.rexpect]
 git = "https://github.com/philippkeller/rexpect"

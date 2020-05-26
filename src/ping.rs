@@ -3,10 +3,10 @@ use crate::packet::{
     ip::IPV4Packet,
     Builder, Packet, PacketError,
 };
+use async_trait::async_trait;
 use socket2::{Domain, Protocol, Type};
 use std::{
     io, net,
-    os::unix::io::AsRawFd,
     time::{self, Duration},
 };
 
@@ -51,14 +51,15 @@ impl Settings {
         if let Some(ttl) = self.ttl {
             sock.set_ttl(ttl).unwrap();
         }
+
         let addr = std::net::SocketAddr::new(self.addr, 0);
-        let sock = Socket2(sock, addr);
+        let sock = Socket2::new(sock, addr);
         Ping::new(sock)
     }
 }
 
 pub struct Ping<S: Socket> {
-    sock: smol::Async<S>,
+    sock: S,
     req: IcmpBuilder,
 }
 
@@ -66,7 +67,6 @@ impl<S: Socket> Ping<S> {
     fn new(sock: S) -> Self {
         let payload = uniq_payload();
         let req = icmp::EchoRequest::new(uniq_ident(), 0).with_payload(&payload);
-        let sock = smol::Async::new(sock).unwrap();
 
         Self { req, sock }
     }
@@ -81,7 +81,7 @@ impl<S: Socket> Ping<S> {
     async fn ping(&mut self, mut buf: &mut [u8]) -> Result<PacketInfo> {
         let size = self.req.build(&mut buf).unwrap();
         self.sock
-            .write_with(|sock| sock.send(&buf[..size]))
+            .send(&buf[..size])
             .await
             .map_err(|err| PingError::Send(err))?;
 
@@ -89,7 +89,7 @@ impl<S: Socket> Ping<S> {
         loop {
             let received_bytes = self
                 .sock
-                .read_with_mut(|sock| sock.recv(&mut buf))
+                .recv(&mut buf)
                 .await
                 .map_err(|err| PingError::Recv(err))?;
 
@@ -150,26 +150,31 @@ fn uniq_ident() -> u16 {
     rand::random()
 }
 
-pub trait Socket: AsRawFd {
-    fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize>;
-    fn send(&self, buf: &[u8]) -> io::Result<usize>;
+#[async_trait]
+pub trait Socket {
+    async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize>;
+    async fn send(&self, buf: &[u8]) -> io::Result<usize>;
 }
 
-pub struct Socket2(socket2::Socket, net::SocketAddr);
+pub struct Socket2(smol::Async<socket2::Socket>, socket2::SockAddr);
 
+impl Socket2 {
+    fn new(sock: socket2::Socket, addr: net::SocketAddr) -> Self {
+        Self(
+            smol::Async::new(sock).unwrap(),
+            socket2::SockAddr::from(addr),
+        )
+    }
+}
+
+#[async_trait]
 impl Socket for Socket2 {
-    fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.0.recv(buf)
+    async fn recv(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read_with_mut(|sock| sock.recv(&mut buf)).await
     }
 
-    fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        self.0.send_to(buf, &self.1.into())
-    }
-}
-
-impl AsRawFd for Socket2 {
-    fn as_raw_fd(&self) -> i32 {
-        self.0.as_raw_fd()
+    async fn send(&self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write_with(|sock| sock.send_to(&buf, &self.1)).await
     }
 }
 
@@ -177,31 +182,35 @@ impl AsRawFd for Socket2 {
 mod tests {
     use super::*;
     use crate::packet::ip::{self, IPV4Builder};
-    use std::{cell::RefCell, collections::HashMap};
+    use std::{
+        cell::RefCell,
+        collections::HashMap,
+        sync::{ Mutex, atomic::{AtomicUsize, Ordering}},
+    };
 
     #[derive(Default)]
     struct TestSocket {
-        builder: RefCell<IcmpBuilder>,
+        builder: Mutex<IcmpBuilder>,
         recv_errors: HashMap<usize, io::Error>,
         send_errors: HashMap<usize, io::Error>,
         changer: HashMap<usize, Box<fn(&mut IcmpBuilder)>>,
         recv: usize,
-        send: RefCell<usize>,
-        // test_socket_fd: RefCell<i32>,
+        send: AtomicUsize,
     }
 
+    #[async_trait]
     impl Socket for TestSocket {
-        fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             self.recv += 1;
             match self.recv_errors.get(&self.recv) {
                 Some(err) => Err(io::Error::new(err.kind(), err.to_string())),
                 None => {
                     if let Some(callback) = self.changer.get(&self.recv) {
-                        callback(self.builder.get_mut());
+                        callback(self.builder.lock().as_mut().unwrap());
                     }
 
                     let mut icmp = [0; 300];
-                    let icmp_size = self.builder.borrow().build(&mut icmp).unwrap();
+                    let icmp_size = self.builder.lock().as_mut().unwrap().build(&mut icmp).unwrap();
                     let ip = IPV4Builder::new(
                         0,
                         ip::Protocol::ICMP,
@@ -216,36 +225,28 @@ mod tests {
             }
         }
 
-        fn send(&self, buf: &[u8]) -> io::Result<usize> {
-            *self.send.borrow_mut() += 1;
-            match self.send_errors.get(&self.send.borrow()) {
+        async fn send(&self, buf: &[u8]) -> io::Result<usize> {
+            self.send.fetch_add(1, Ordering::Release);
+            match self.send_errors.get(&self.send.load(Ordering::SeqCst)) {
                 Some(err) => Err(io::Error::new(err.kind(), err.to_string())),
                 None => {
-                    self.builder.borrow_mut().seq += 1;
+                    self.builder.lock().as_mut().unwrap().seq += 1;
                     Ok(buf.len())
                 }
             }
         }
     }
 
-    impl AsRawFd for TestSocket {
-        fn as_raw_fd(&self) -> i32 {
-            // *self.test_socket_fd.borrow_mut() += 1;
-            // *self.test_socket_fd.borrow()
-            0
-        }
-    }
-
     fn test_ping() -> Ping<TestSocket> {
         let mut ping = Ping::new(TestSocket::default());
-        ping.sock.get_mut().builder = RefCell::new(ping.req.clone());
-        ping.sock.get_mut().builder.borrow_mut().tp = icmp::PacketType::EchoReply as u8;
+        *ping.sock.builder.get_mut().unwrap() = ping.req.clone();
+        ping.sock.builder.get_mut().unwrap().tp = icmp::PacketType::EchoReply as u8;
         ping
     }
 
     fn counts(ping: &Ping<TestSocket>) -> (usize, usize) {
-        let send_count = *ping.sock.get_ref().send.borrow();
-        let recv_count = ping.sock.get_ref().recv;
+        let send_count = ping.sock.send.load(Ordering::Relaxed);
+        let recv_count = ping.sock.recv;
 
         (send_count, recv_count)
     }
@@ -270,7 +271,6 @@ mod tests {
         let mut ping = test_ping();
 
         ping.sock
-            .get_mut()
             .send_errors
             .insert(2, io::ErrorKind::Other.into());
 
@@ -295,7 +295,6 @@ mod tests {
         let mut ping = test_ping();
 
         ping.sock
-            .get_mut()
             .recv_errors
             .insert(2, io::ErrorKind::Other.into());
 
@@ -320,14 +319,14 @@ mod tests {
         let mut ping = test_ping();
 
         // spoil the playgound
-        ping.sock.get_mut().changer.insert(
+        ping.sock.changer.insert(
             2,
             Box::new(|builder| {
                 builder.payload.as_mut().map(|p| p.reverse());
             }),
         );
 
-        ping.sock.get_mut().changer.insert(
+        ping.sock.changer.insert(
             4,
             Box::new(|builder| {
                 builder.payload.as_mut().map(|p| p.reverse());
